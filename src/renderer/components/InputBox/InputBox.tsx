@@ -570,6 +570,18 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
         return
       }
       if (event.clipboardData?.items) {
+        // Check if we're pasting long text that should become a file
+        // We need to do this check synchronously before the default paste behavior happens
+        const plainText = event.clipboardData.getData('text/plain')
+        if (pasteLongTextAsAFile && plainText && plainText.trim().length > 3000) {
+          event.preventDefault() // Prevent default paste behavior for long text
+          const file = new File([plainText], `pasted_text_${attachments?.length || 0}.txt`, {
+            type: 'text/plain',
+          })
+          insertFiles([file])
+          return
+        }
+
         // 对于 Doc/PPT/XLS 等文件中的内容，粘贴时一般会有 4 个 items，分别是 text 文本、html、某格式和图片
         // 因为 getAsString 为异步操作，无法根据 items 中的内容来定制不同的粘贴行为，因此这里选择了最简单的做法：
         // 保持默认的粘贴行为，这时候会粘贴从文档中复制的文本和图片。我认为应该保留图片，因为文档中的表格、图表等图片信息也很重要，很难通过文本格式来表述。
@@ -596,13 +608,6 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
                   .map((url) => url.trim())
                   .filter((url) => url.startsWith('http://') || url.startsWith('https://'))
                 insertLinks(urls)
-              }
-              if (pasteLongTextAsAFile && raw.length > 3000) {
-                const file = new File([text], `pasted_text_${attachments?.length || 0}.txt`, {
-                  type: 'text/plain',
-                })
-                insertFiles([file])
-                setMessageInput(messageInput) // 删除掉默认粘贴进去的长文本
               }
             })
           }
