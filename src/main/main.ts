@@ -180,7 +180,19 @@ function createTray() {
     },
   ])
   tray.setToolTip('Chatbox')
-  tray.setContextMenu(contextMenu)
+  if (process.platform === 'linux') {
+    // Linux tray implementations don't reliably emit right-click events,
+    // so setContextMenu is needed for the context menu to be accessible.
+    tray.setContextMenu(contextMenu)
+  } else {
+    // On macOS and Windows: right-click opens the menu via popUpContextMenu.
+    // (setContextMenu() would intercept left-click on Windows.)
+    tray.on('right-click', () => {
+      tray?.popUpContextMenu(contextMenu)
+    })
+  }
+  // Left-click toggles the window on all platforms.
+  tray.on('click', showOrHideWindow)
   tray.on('double-click', showOrHideWindow)
   return tray
 }
@@ -434,9 +446,6 @@ if (!gotTheLock) {
       await knowledgeBaseInitPromise
       await createWindow()
       ensureTray()
-      // Remove this if your app does not use auto updates
-      // eslint-disable-next-line
-      new AppUpdater(() => mainWindow?.webContents.send('update-downloaded', {}))
 
       // 处理启动时的 Deep Link (Windows/Linux)
       // macOS 会通过 open-url 事件处理，不需要在这里处理

@@ -11,6 +11,44 @@ export interface OAuthProviderInfo {
   flowType: 'callback' | 'code-paste' | 'device-code'
 }
 
+export interface OAuthResult {
+  success: boolean
+  error?: string
+  credentials?: {
+    accessToken?: string
+    refreshToken?: string
+    expiresAt?: number
+    [key: string]: unknown
+  }
+}
+
+export interface OAuthStartResult {
+  success: boolean
+  error?: string
+  url?: string
+}
+
+export interface DeviceFlowStartResult {
+  success: boolean
+  error?: string
+  userCode?: string
+  verificationUri?: string
+  expiresIn?: number
+  interval?: number
+}
+
+// Stub IPC channel names. Open-source build never reaches these handlers
+// (isDesktop guards short-circuit, or the main process simply has no listener).
+export const OAuthIpcChannels = {
+  LOGIN: 'oauth:login',
+  START_LOGIN: 'oauth:start-login',
+  EXCHANGE_CODE: 'oauth:exchange-code',
+  START_DEVICE_FLOW: 'oauth:start-device-flow',
+  WAIT_DEVICE_TOKEN: 'oauth:wait-device-token',
+  REFRESH: 'oauth:refresh',
+  CANCEL: 'oauth:cancel',
+} as const
+
 export function mergeSharedOAuthProviderSettings(
   providerId: string,
   providers: Record<string, ProviderSettings> | undefined
