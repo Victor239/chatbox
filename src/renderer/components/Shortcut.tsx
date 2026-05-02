@@ -1,5 +1,6 @@
-import { Box, Combobox, Flex, Input, InputBase, Kbd, Select, Table, Text, useCombobox } from '@mantine/core'
+import { Box, Button, Combobox, Flex, Input, InputBase, Kbd, Select, Table, Text, useCombobox } from '@mantine/core'
 import { IconAlertHexagon } from '@tabler/icons-react'
+import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   type Settings,
@@ -12,6 +13,30 @@ import { getOS } from '@/packages/navigator'
 import { ScalableIcon } from './ScalableIcon'
 
 const os = getOS()
+
+// Constants for keyboard shortcut recording
+const MODIFIER_KEYS = ['Control', 'Alt', 'Shift', 'Meta', 'OS', 'Command']
+const MODIFIER_KEY_NAMES = ['Ctrl', 'Alt', 'Shift', 'Command', 'Control', 'Super']
+const FUNCTION_KEY_PATTERN = /^F([1-9]|1[0-9]|2[0-4])$/
+const RESERVED_SHORTCUTS = new Set([
+  'Ctrl+V', 'Ctrl+C', 'Ctrl+X', 'Ctrl+Z', 'Ctrl+Y', 'Ctrl+A', 'Ctrl+S',
+  'Command+V', 'Command+C', 'Command+X', 'Command+Z', 'Command+Y', 'Command+A', 'Command+S',
+])
+
+// Mapping for special key normalization
+const KEY_NORMALIZATION_MAP: Record<string, string> = {
+  ' ': 'Space',
+  Escape: 'Escape',
+  Enter: 'Enter',
+  Tab: 'Tab',
+  Backspace: 'Backspace',
+  Delete: 'Delete',
+  Insert: 'Insert',
+  Home: 'Home',
+  End: 'End',
+  PageUp: 'PageUp',
+  PageDown: 'PageDown',
+}
 
 function formatKey(key: string) {
   const COMMON_KEY_MAPS: Record<string, string> = {
@@ -106,7 +131,6 @@ export function ShortcutConfig(props: {
       label: t('Show/Hide the Application Window'),
       name: 'quickToggle',
       keys: shortcuts.quickToggle,
-      options: shortcutToggleWindowValues,
     },
     {
       label: t('Focus on the Input Box'),
@@ -209,7 +233,21 @@ export function ShortcutConfig(props: {
             <Table.Tr key={`${name}`}>
               <Table.Td>{label}</Table.Td>
               <Table.Td>
-                {options ? (
+                {name === 'quickToggle' ? (
+                  <ShortcutRecorder
+                    value={keys}
+                    onSelect={(val) => {
+                      if (name && setShortcuts) {
+                        setShortcuts({
+                          ...shortcuts,
+                          [name]: val,
+                        })
+                      }
+                    }}
+                    isConflict={name ? isConflict(name, keys) : false}
+                    suggestedValues={shortcutToggleWindowValues}
+                  />
+                ) : options ? (
                   <ShortcutSelect
                     options={options}
                     value={keys}
@@ -246,6 +284,203 @@ function ShortcutText(props: { shortcut: string; isConflict?: boolean; className
       <Keys keys={shortcut.split('+')} />
       {isConflict && <ScalableIcon icon={IconAlertHexagon} size={16} />}
     </Flex>
+  )
+}
+
+function ShortcutRecorder({
+  value,
+  onSelect,
+  isConflict,
+  suggestedValues,
+}: {
+  value: string
+  onSelect?(val: string): void
+  isConflict?: boolean
+  suggestedValues?: string[]
+}) {
+  const { t } = useTranslation()
+  const [isRecording, setIsRecording] = useState(false)
+  const [recordedKeys, setRecordedKeys] = useState<string[]>([])
+  const recordedKeysRef = useRef<string[]>([])
+  const combobox = useCombobox({
+    onDropdownClose: () => combobox.resetSelectedOption(),
+  })
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (!isRecording) return
+
+    e.preventDefault()
+    e.stopPropagation()
+
+    // Escape cancels recording instead of being saved as a shortcut
+    if (e.key === 'Escape') {
+      handleCancelRecording()
+      return
+    }
+
+    const keys: string[] = []
+
+    // Capture modifier keys in the correct order
+    // For cross-platform compatibility, prefer Command on Mac and Ctrl on other platforms
+    // The main.ts normalizer will convert these to proper Electron format
+    if (os === 'Mac') {
+      // On Mac, prefer Command over Control
+      if (e.metaKey) {
+        keys.push('Command')
+      } else if (e.ctrlKey) {
+        keys.push('Ctrl')
+      }
+    } else {
+      // On Windows/Linux, handle Ctrl and Super/Meta separately
+      if (e.ctrlKey) {
+        keys.push('Ctrl')
+      }
+      if (e.metaKey) {
+        // metaKey is the Super key on Linux and Windows key on Windows
+        keys.push('Super')
+      }
+    }
+    if (e.altKey) {
+      keys.push('Alt')
+    }
+    if (e.shiftKey) {
+      keys.push('Shift')
+    }
+
+    // Capture the main key (not a modifier)
+    const pressedKey = e.key
+    const isModifier = MODIFIER_KEYS.includes(pressedKey)
+
+    if (!isModifier && pressedKey) {
+      // Normalize special keys to match Electron's accelerator format
+      let normalizedKey = pressedKey
+
+      // Check if key is in normalization map
+      if (KEY_NORMALIZATION_MAP[pressedKey]) {
+        normalizedKey = KEY_NORMALIZATION_MAP[pressedKey]
+      } else if (pressedKey === '`') {
+        // Backtick is kept as-is
+        normalizedKey = '`'
+      } else if (pressedKey.startsWith('Arrow')) {
+        // ArrowUp -> Up, ArrowDown -> Down, etc.
+        normalizedKey = pressedKey.replace('Arrow', '')
+      } else if (FUNCTION_KEY_PATTERN.test(pressedKey)) {
+        // Function keys F1-F24
+        normalizedKey = pressedKey
+      } else if (pressedKey.length === 1) {
+        // Single character keys - keep uppercase for consistency
+        normalizedKey = pressedKey.toUpperCase()
+      }
+      // Other keys - keep as is (default value)
+
+      keys.push(normalizedKey)
+    }
+
+    // Block reserved system shortcuts (e.g. Ctrl+V) to prevent intercepting OS-level operations
+    if (RESERVED_SHORTCUTS.has(keys.join('+'))) {
+      return
+    }
+
+    recordedKeysRef.current = keys
+    setRecordedKeys(keys)
+  }
+
+  const handleKeyUp = (e: React.KeyboardEvent) => {
+    if (!isRecording) return
+
+    e.preventDefault()
+    e.stopPropagation()
+
+    // Use ref (not state) to avoid stale closure when keyUp fires before re-render
+    const currentKeys = recordedKeysRef.current
+    if (currentKeys.length > 0) {
+      const lastKey = currentKeys[currentKeys.length - 1]
+      const isModifier = MODIFIER_KEY_NAMES.includes(lastKey)
+
+      if (!isModifier) {
+        const shortcut = currentKeys.join('+')
+        onSelect?.(shortcut)
+        setIsRecording(false)
+        setRecordedKeys([])
+        recordedKeysRef.current = []
+      }
+    }
+  }
+
+  const handleStartRecording = () => {
+    setIsRecording(true)
+    setRecordedKeys([])
+    recordedKeysRef.current = []
+  }
+
+  const handleCancelRecording = () => {
+    setIsRecording(false)
+    setRecordedKeys([])
+    recordedKeysRef.current = []
+  }
+
+  const handleClearShortcut = () => {
+    onSelect?.('')
+  }
+
+  const displayValue = isRecording ? (recordedKeys.length > 0 ? recordedKeys.join('+') : t('Press keys...')) : value
+
+  return (
+    <Box>
+      <Flex gap="xs" align="center">
+        <InputBase
+          maw={200}
+          component="button"
+          type="button"
+          pointer
+          onClick={handleStartRecording}
+          onKeyDown={handleKeyDown}
+          onKeyUp={handleKeyUp}
+          onBlur={handleCancelRecording}
+          style={{
+            backgroundColor: isRecording ? 'var(--mantine-color-blue-0)' : undefined,
+            border: isRecording ? '2px solid var(--mantine-color-blue-5)' : undefined,
+          }}
+        >
+          <ShortcutText shortcut={displayValue} isConflict={isConflict} />
+        </InputBase>
+        {isRecording && (
+          <Button size="xs" variant="subtle" onClick={handleCancelRecording}>
+            {t('Cancel')}
+          </Button>
+        )}
+        {!isRecording && value && (
+          <Button size="xs" variant="subtle" onClick={handleClearShortcut}>
+            {t('Clear')}
+          </Button>
+        )}
+        {!isRecording && suggestedValues && suggestedValues.length > 0 && (
+          <Combobox
+            store={combobox}
+            onOptionSubmit={(val) => {
+              onSelect?.(val)
+              combobox.closeDropdown()
+            }}
+          >
+            <Combobox.Target targetType="button">
+              <Button size="xs" variant="subtle" onClick={() => combobox.toggleDropdown()}>
+                {t('Suggestions')}
+              </Button>
+            </Combobox.Target>
+
+            <Combobox.Dropdown>
+              <Combobox.Options>
+                {suggestedValues.map((o) => (
+                  <Combobox.Option key={o} value={o}>
+                    <ShortcutText shortcut={o} />
+                  </Combobox.Option>
+                ))}
+              </Combobox.Options>
+            </Combobox.Dropdown>
+          </Combobox>
+        )}
+      </Flex>
+    </Box>
   )
 }
 
